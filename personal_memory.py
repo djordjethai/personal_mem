@@ -31,13 +31,17 @@ def save_personal_facts(user_input):
             {"role": "user", "content": f"Check if {facts} already exists in any form in {data}. Answer only Yes or No"}
         ])
     if_exists = exists.choices[0].message.content 
-    print(data)
-    print(if_exists)
+    
+    print(f"Postojeci licni podaci: {data}")
+    print("")
+    print(f"Postoje li ovi licni podaci: {if_exists}")
+    print("____________________")
+
     if if_exists == "No":
         data.append(facts)
-        print("new fact added")
+        print(f"new licni fact {facts} added")
     else:
-        print(f"The fact {facts} exists")    
+        print(f"The licni fact {facts} exists")    
 
     # Step 3: Write the updated list back to the JSON file
     with open('personal_facts.json', 'w', encoding="utf-8") as file:
@@ -72,13 +76,16 @@ def save_business_facts(user_input):
             {"role": "user", "content": f"Check if {facts} already exists in any form in {data}. Answer only Yes or No"}
         ])
     if_exists = exists.choices[0].message.content 
-    print(data)
-    print(if_exists)
+    print(f"Postojeci poslovni podaci: {data}")
+    print("")
+    print(f"Postoje li ovi poslovni podaci: {if_exists}")
+    print("____________________")
+
     if if_exists == "No":
         data.append(facts)
-        print("new fact added")
+        print(f"new poslovni fact {facts} added")
     else:
-        print(f"The fact {facts} exists")    
+        print(f"The poslovni fact {facts} exists")    
 
     # Step 3: Write the updated list back to the JSON file
     with open('business_facts.json', 'w', encoding="utf-8") as file:
@@ -96,6 +103,17 @@ def retrieve_personal_facts(query):
     else:
         return ["No matching personal facts found."]
 
+def retrieve_business_facts(query):
+    try:
+        with open('business_facts.json', 'r', encoding="utf-8") as f:
+            facts = json.load(f)
+    except FileNotFoundError:
+        return ["No business facts available."]
+   
+    if facts:
+        return facts
+    else:
+        return ["No matching personal facts found."]
 # Define the functions for the assistant to call
 tool_list = [
     {   "type": "function",
@@ -146,23 +164,85 @@ response = client.chat.completions.create(
     tool_choice='auto'
     
 )
-try:
-    izbor = response.choices[0].message.tool_calls[0].function.name
-except:
-    izbor = "no tools"    
 
-print(izbor)
 # Process function calls in a loop
+if response.choices[0].message.tool_calls is not None:
+    for tool_call in response.choices[0].message.tool_calls:
 
-if izbor == 'save_personal_facts':
-        save_personal_facts(user_input)
-        print("Personal facts saved to personal_facts.json")
+        if tool_call.function.name == 'save_personal_facts':
+                save_personal_facts(user_input)
+                print("Personal facts saved to personal_facts.json")
 
-print("All facts have been processed.")
-personal = retrieve_personal_facts(user_input)
+        if tool_call.function.name == 'save_business_facts':
+                save_business_facts(user_input)
+                print("Business facts saved to business_facts.json")    
+else:
+    print("No tools selected!")       
+
+
+
+ret_tool_list = [
+    {   "type": "function",
+           "function": {
+                "name": "retrieve_personal_facts",
+                "description": "Retrieves personal facts about me.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "facts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of personal facts."
+                        },
+                    },
+            "required": ["facts"],
+        },
+    }},
+        {  "type": "function",
+           "function": {
+            "name": "retrieve_business_facts",
+            "description": "Retrieves business facts about my Company.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "facts": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of business facts."
+                    },
+                },
+                "required": ["facts"],
+            },
+    }},
+]
+
+ret_response = client.chat.completions.create(
+    model="gpt-4o-mini",  # or another model you prefer
+    messages=messages,
+    tools=ret_tool_list,
+    tool_choice='required'
+    
+)
+
+print("Retrieval.....")
+print("")
+ret_facts = []
+if ret_response.choices[0].message.tool_calls is not None:
+    for tool_call in ret_response.choices[0].message.tool_calls:
+        if tool_call.function.name == 'retrieve_personal_facts':
+            ret_facts.append(retrieve_personal_facts(user_input))
+            print("Personal facts retrieved from personal_facts.json")
+
+        if tool_call.function.name == 'retrieve_business_facts':
+            ret_facts.append(retrieve_business_facts(user_input))
+            print("Business facts retreived from business_facts.json") 
+else:
+    print("No tools selected!")       
+
+
 
 prompt = f"""
-    Please answer the question {user_input} based on this context {personal}
+    Please answer the question {user_input} based on this context {ret_facts}
     """
 response = client.chat.completions.create(
     model="gpt-4o-mini",
@@ -171,4 +251,7 @@ response = client.chat.completions.create(
 ],
     )
 answer = response.choices[0].message.content
+print("")
+print("_______________")
 print(answer)
+print("_______________")
