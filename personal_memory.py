@@ -1,152 +1,103 @@
 from openai import OpenAI
+from pinecone.grpc import PineconeGRPC as Pinecone
+import os
+from datetime import datetime
 import json
 
 client = OpenAI()
 
-def save_personal_facts(user_input):
+# Initialize Pinecone
+index_name="memory" #opsti index za memoriju
+pc=Pinecone(api_key=os.environ.get("PINECONE_API_KEY"), host='https://memory-a9w1e6k.svc.aped-4627-b74a.pinecone.io') #memory (djordje, standard)
+index = pc.Index(name=index_name, host='https://memory-a9w1e6k.svc.aped-4627-b74a.pinecone.io') #memory semantic
+user_id = "test01" # konkretan prijavljeni user
+namespace = "razvoj01" # konkretni klijent (firma)
+current_date = datetime.now()
+date_string = current_date.strftime('%Y%m%d')
+
+# Function to save personal facts using Pinecone
+def save_facts(user_input, user_id, namespace, fact_type):
+    # Step 1: Extract a concise personal fact using OpenAI GPT
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages = [
-            {"role": "user", "content": f"Write only relevant personal fact from this text {user_input} concisely. Omit pronouns, write the fact only"}
-        ])
-    facts = response.choices[0].message.content 
-    try:
-        # Step 1: Read the existing data from the JSON file
-        with open('personal_facts.json', 'r', encoding="utf-8") as file:
-            data = json.load(file)
-            # Ensure that the data is a list
-            if not isinstance(data, list):
-                raise ValueError(f"The JSON data is not a list.")
-    except FileNotFoundError:
-        # If the file doesn't exist, start with an empty list
-        data = []
-    except json.JSONDecodeError:
-        # If the file is empty or contains invalid JSON, start with an empty list
-        data = []
+        messages=[{"role": "user", "content": f"Write only relevant fact from this text '{user_input}' concisely."}]
+    )
+    fact = response.choices[0].message.content
 
-    # Step 2: Append the new item to the list
-    exists = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages = [
-            {"role": "user", "content": f"Check if {facts} already exists in any form in {data}. Answer only Yes or No"}
-        ])
-    if_exists = exists.choices[0].message.content 
+    # Step 2: Embed the fact using OpenAI Embedding API (512 dimensions)
+    embedding = client.embeddings.create(input = [fact], dimensions=512, model="text-embedding-3-small").data[0].embedding
+
+    # Step 3: Check if the fact already exists using Pinecone
+    query_response = index.query(
+        vector=embedding,
+        namespace=namespace,
+        top_k=1,
+        filter={"user_id": user_id, "type": fact_type},
+        include_metadata=True
+    )
     
-    print(f"Postojeci licni podaci: {data}")
-    print("")
-    print(f"Postoje li ovi licni podaci: {if_exists}")
-    print("____________________")
-
-    if if_exists == "No":
-        data.append(facts)
-        print(f"new licni fact {facts} added")
+    # If no similar facts are found (based on a similarity threshold)
+    if not query_response['matches'] or query_response['matches'][0]['score'] < 0.85:
+        # Step 4: Store the new fact in Pinecone with metadata
+        index.upsert(namespace=namespace,
+            vectors=[{
+                "id": f"{user_id}_{fact_type}_{len(query_response['matches']) + 1}",
+                "values": embedding,
+                "metadata": {
+                    "text": fact,
+                    "user_id": user_id,
+                    "type": fact_type,
+                    "date": int(date_string)
+                }
+            }]
+        )
+        print(f"New fact '{fact}' added to Pinecone.")
     else:
-        print(f"The licni fact {facts} exists")    
+        print(f"The fact '{fact}' already exists.")
 
-    # Step 3: Write the updated list back to the JSON file
-    with open('personal_facts.json', 'w', encoding="utf-8") as file:
-        json.dump(data, file, indent=4)
-
-
-def save_business_facts(user_input):
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages = [
-            {"role": "user", "content": f"Write only relevant business fact from this text {user_input} concisely. Omit pronouns, write the fact only"}
-        ])
-    facts = response.choices[0].message.content 
-    try:
-        # Step 1: Read the existing data from the JSON file
-        with open('business_facts.json', 'r', encoding="utf-8") as file:
-            data = json.load(file)
-            # Ensure that the data is a list
-            if not isinstance(data, list):
-                raise ValueError(f"The JSON data is not a list.")
-    except FileNotFoundError:
-        # If the file doesn't exist, start with an empty list
-        data = []
-    except json.JSONDecodeError:
-        # If the file is empty or contains invalid JSON, start with an empty list
-        data = []
-
-    # Step 2: Append the new item to the list
-    exists = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages = [
-            {"role": "user", "content": f"Check if {facts} already exists in any form in {data}. Answer only Yes or No"}
-        ])
-    if_exists = exists.choices[0].message.content 
-    print(f"Postojeci poslovni podaci: {data}")
-    print("")
-    print(f"Postoje li ovi poslovni podaci: {if_exists}")
-    print("____________________")
-
-    if if_exists == "No":
-        data.append(facts)
-        print(f"new poslovni fact {facts} added")
+def retrieve_facts(query, user_id, namespace, fact_type):
+    # Step 1: Embed the query using OpenAI Embedding API
+    query_embedding = client.embeddings.create(input = [query], dimensions=512, model="text-embedding-3-small").data[0].embedding
+    
+    # Step 2: Search for personal facts in Pinecone using metadata filter and similarity
+    query_response = index.query(
+        vector=query_embedding,
+        namespace=namespace,
+        top_k=5,
+        filter={"user_id": user_id, "type": fact_type},
+        include_metadata=True
+    )
+    
+    # Step 3: Process and return the retrieved facts
+    if query_response['matches']:
+        personal_facts = [match['metadata']['text'] for match in query_response['matches'] if match['score'] >= 0.1]
     else:
-        print(f"The poslovni fact {facts} exists")    
+        personal_facts = "I don't know"    
+    return personal_facts
 
-    # Step 3: Write the updated list back to the JSON file
-    with open('business_facts.json', 'w', encoding="utf-8") as file:
-        json.dump(data, file, indent=4)
 
-def retrieve_personal_facts(query):
-    try:
-        with open('personal_facts.json', 'r', encoding="utf-8") as f:
-            facts = json.load(f)
-    except FileNotFoundError:
-        return ["No personal facts available."]
-   
-    if facts:
-        return facts
-    else:
-        return ["No matching personal facts found."]
-
-def retrieve_business_facts(query):
-    try:
-        with open('business_facts.json', 'r', encoding="utf-8") as f:
-            facts = json.load(f)
-    except FileNotFoundError:
-        return ["No business facts available."]
-   
-    if facts:
-        return facts
-    else:
-        return ["No matching personal facts found."]
 # Define the functions for the assistant to call
 tool_list = [
     {   "type": "function",
            "function": {
-                "name": "save_personal_facts",
-                "description": "Extracts personal facts and saves them to a JSON file.",
+                "name": "save_facts",
+                "description": "Extracts facts and saves them to a JSON file.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "facts": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "List of personal facts."
+                            "description": "List of facts."
+                        },
+                        "fact_type": {
+                            "type": "string",
+                            "enum": ["personal", "business", "other"],
+                            "description": "List of fact types (personal, business, other)."
                         },
                     },
-            "required": ["facts"],
+            "required": ["facts", "fact_type"],
         },
-    }},
-        {  "type": "function",
-           "function": {
-            "name": "save_business_facts",
-            "description": "Extracts business facts and saves them to a JSON file.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "facts": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of business facts."
-                    },
-                },
-                "required": ["facts"],
-            },
     }},
 ]
 
@@ -169,13 +120,15 @@ response = client.chat.completions.create(
 if response.choices[0].message.tool_calls is not None:
     for tool_call in response.choices[0].message.tool_calls:
 
-        if tool_call.function.name == 'save_personal_facts':
-                save_personal_facts(user_input)
-                print("Personal facts saved to personal_facts.json")
+        if tool_call.function.name == 'save_facts':
+                fact_dict = json.loads(tool_call.function.arguments)
+                fact_type= fact_dict['fact_type']
+                save_facts(user_input, user_id, namespace, fact_type)
+                print("!!!!!!!!!")
+                print(f"Facts upserted: type: {fact_dict["fact_type"]} fact: {fact_dict["facts"]}")
+                
 
-        if tool_call.function.name == 'save_business_facts':
-                save_business_facts(user_input)
-                print("Business facts saved to business_facts.json")    
+
 else:
     print("No tools selected!")       
 
@@ -184,35 +137,24 @@ else:
 ret_tool_list = [
     {   "type": "function",
            "function": {
-                "name": "retrieve_personal_facts",
-                "description": "Retrieves personal facts about me.",
+                "name": "retrieve_facts",
+                "description": "Retrieves facts about me.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "facts": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "List of personal facts."
+                            "description": "List of facts."
+                        },
+                        "fact_type": {
+                            "type": "string",
+                            "enum": ["personal", "business", "other"],
+                            "description": "List of fact types (personal, business, other)."
                         },
                     },
-            "required": ["facts"],
+            "required": ["facts", "fact_type"],
         },
-    }},
-        {  "type": "function",
-           "function": {
-            "name": "retrieve_business_facts",
-            "description": "Retrieves business facts about my Company.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "facts": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of business facts."
-                    },
-                },
-                "required": ["facts"],
-            },
     }},
 ]
 
@@ -224,22 +166,23 @@ ret_response = client.chat.completions.create(
     
 )
 
+print("")
+print("_______________________")
 print("Retrieval.....")
 print("")
 ret_facts = []
 if ret_response.choices[0].message.tool_calls is not None:
     for tool_call in ret_response.choices[0].message.tool_calls:
-        if tool_call.function.name == 'retrieve_personal_facts':
-            ret_facts.append(retrieve_personal_facts(user_input))
-            print("Personal facts retrieved from personal_facts.json")
-
-        if tool_call.function.name == 'retrieve_business_facts':
-            ret_facts.append(retrieve_business_facts(user_input))
-            print("Business facts retreived from business_facts.json") 
+        if tool_call.function.name == 'retrieve_facts':
+            fact_dict = json.loads(tool_call.function.arguments)
+            fact_type= fact_dict['fact_type']
+            ret_facts.append(retrieve_facts(user_input, user_id, namespace, fact_type))
+            print("!!!!!!!!!")
+            print(f"Facts retrieved: fact type: {fact_dict["fact_type"]} fact: {fact_dict["facts"]}")
+           
+            
 else:
     print("No tools selected!")       
-
-
 
 prompt = f"""
     Please answer the question {user_input} based on this context {ret_facts}
