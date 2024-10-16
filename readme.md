@@ -1,11 +1,11 @@
 # Personal and Business Facts Assistant
 
-This project provides a framework for storing and retrieving personal or business facts from JSON files using a Language Model (LLM) to dynamically handle queries. The assistant is capable of understanding user input and storing relevant facts in separate JSON files (e.g., personal and business facts). It can later retrieve these facts based on the context of the user's queries, allowing for more personalized and context-aware responses.
+This project provides a framework for storing and retrieving personal or business facts from a vector database using a Language Model (LLM) to dynamically handle queries. The assistant is capable of understanding user input and storing relevant facts with separate fact type (e.g., personal and business facts). It can later retrieve these facts based on the context of the user's queries, allowing for more personalized and context-aware responses.
 
 ## Features
 
 - **Fact Storage:**
-  - The assistant can store user-provided facts, such as personal preferences or business-related information, into JSON files without overwriting previously stored facts. Each new fact is appended to the existing list in the relevant JSON file.
+  - The assistant can store user-provided facts, such as personal preferences or business-related information, into vectro database without overwriting previously stored facts. Each new fact is upserted to the existing index in the relevant vector store.
   
 - **Fact Retrieval:**
   - The assistant retrieves stored facts based on user queries. It uses an LLM to understand the user’s input and match it with the stored facts, even if the phrasing or language differs from the original input.
@@ -36,7 +36,7 @@ This project provides a framework for storing and retrieving personal or busines
    - Users provide input, such as personal preferences ("I don't like apples") or business-related facts.
 
 2. **Fact Storage:**
-   - The assistant analyzes the input and stores the extracted facts in the relevant JSON file (either for personal or business facts), ensuring that existing facts are not overwritten.
+   - The assistant analyzes the input and stores the extracted facts in the relevant vectorstore index (either for personal or business facts), ensuring that existing facts are not overwritten.
 
 3. **Fact Retrieval:**
    - When a user asks a question, the assistant retrieves stored facts that match the query context. For instance, if the user requests, "Make me a recipe for a fruit salad, but without the fruit I don't like," the assistant searches for previously stored facts to exclude disliked fruits.
