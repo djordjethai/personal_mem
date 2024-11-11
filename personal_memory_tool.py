@@ -79,11 +79,33 @@ def retrieve_facts(query, user_id, namespace, fact_type, app_id):
 
 
 # Define the functions for the assistant to call
+ret_facts= []
 tool_list = [
     {   "type": "function",
            "function": {
                 "name": "save_facts",
                 "description": "Extracts facts and saves them to a JSON file.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "facts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of facts."
+                        },
+                        "fact_type": {
+                            "type": "string",
+                            "enum": ["personal", "business", "other"],
+                            "description": "List of fact types (personal, business, other)."
+                        },
+                    },
+            "required": ["facts", "fact_type"],
+        },
+    }},
+    {   "type": "function",
+           "function": {
+                "name": "retrieve_facts",
+                "description": "Retrieves facts about me.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -130,51 +152,6 @@ if response.choices[0].message.tool_calls is not None:
                 print(f"Facts upserted: type: {fact_dict["fact_type"]} fact: {fact_dict["facts"]}")
                 
 
-
-else:
-    print("No tools selected!")       
-
-
-
-ret_tool_list = [
-    {   "type": "function",
-           "function": {
-                "name": "retrieve_facts",
-                "description": "Retrieves facts about me.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "facts": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of facts."
-                        },
-                        "fact_type": {
-                            "type": "string",
-                            "enum": ["personal", "business", "other"],
-                            "description": "List of fact types (personal, business, other)."
-                        },
-                    },
-            "required": ["facts", "fact_type"],
-        },
-    }},
-]
-
-ret_response = client.chat.completions.create(
-    model="gpt-4o-mini",  # or another model you prefer
-    messages=messages,
-    tools=ret_tool_list,
-    tool_choice='required'
-    
-)
-
-print("")
-print("_______________________")
-print("Retrieval.....")
-print("")
-ret_facts = []
-if ret_response.choices[0].message.tool_calls is not None:
-    for tool_call in ret_response.choices[0].message.tool_calls:
         if tool_call.function.name == 'retrieve_facts':
             fact_dict = json.loads(tool_call.function.arguments)
             fact_type= fact_dict['fact_type']
@@ -182,20 +159,21 @@ if ret_response.choices[0].message.tool_calls is not None:
             print("!!!!!!!!!")
             print(f"Facts retrieved: fact type: {fact_dict["fact_type"]} fact: {fact_dict["facts"]}")
            
-            
 else:
     print("No tools selected!")       
+print(response)
+
 
 prompt = f"""
-    Please answer the question {user_input} based on this context {ret_facts}
+    Please answer the question {user_input} based on context {ret_facts}, if any. If not just naswer the question.
     """
-response = client.chat.completions.create(
+response1 = client.chat.completions.create(
     model="gpt-4o-mini",
     messages=[
     {"role": "user", "content": prompt}
 ],
     )
-answer = response.choices[0].message.content
+answer = response1.choices[0].message.content
 print("")
 print("_______________")
 print(answer)
